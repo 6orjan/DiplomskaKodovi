@@ -93,7 +93,7 @@ test_data <- subset(labeled_data, country %in% subset(locations, test == 1)$coun
 # Define proper cross-validation control
 cctrl1 <- trainControl(
   method = "cv",
-  number = 5,
+  number = 5, #how many times the model will run
   verboseIter = TRUE,  # Set to TRUE to see progress
   savePredictions = TRUE,
   allowParallel = TRUE
