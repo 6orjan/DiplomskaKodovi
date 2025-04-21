@@ -1,3 +1,5 @@
+# Fix for script 07_model_performance.R
+
 # First, ensure all necessary packages are loaded
 library(dplyr)
 library(stringr)
@@ -7,10 +9,20 @@ library(ggplot2)
 library(ggpmisc)  # For stat_poly_eq
 library(cowplot)  # For plot_grid
 library(fixest)   # For feols
+library(scales)   # For axis formatting
+
+# Define n_draws if it doesn't exist (this was missing in your code)
+
 
 # Custom vlookup function if it's not already defined
 if(!exists("vlookup")) {
   vlookup <- function(lookup_value, table, lookup_column, result_column) {
+    # Check if the result_column exists in the table
+    if(!all(result_column %in% colnames(table))) {
+      warning(paste("Column(s) not found in table:", 
+                    paste(setdiff(result_column, colnames(table)), collapse=", ")))
+      return(NA)
+    }
     result <- table[match(lookup_value, table[[lookup_column]]), result_column]
     return(result)
   }
@@ -19,6 +31,11 @@ if(!exists("vlookup")) {
 # Define update_GDPpc_t0 function if it's not already defined
 if(!exists("update_GDPpc_t0")) {
   update_GDPpc_t0 <- function(data_subset, full_data, labeled_data, year_value, column_prefix = "") {
+    # Create GDPpc_t0 column if it doesn't exist
+    if(!paste0(column_prefix, "GDPpc_t0") %in% colnames(data_subset)) {
+      data_subset[[paste0(column_prefix, "GDPpc_t0")]] <- NA
+    }
+    
     # Find the closest year data for each country
     for(i in 1:nrow(data_subset)) {
       country_code <- data_subset$country[i]
@@ -90,11 +107,118 @@ for(i in 1:nrow(locations)){
 training_data <- subset(labeled_data, country %in% subset(locations, test == 0)$country)
 test_data <- subset(labeled_data, country %in% subset(locations, test == 1)$country)
 
+# Define k if it doesn't exist (for 07a script)
+if(!exists("k")) {
+  k <- 5  # Default value
+}
+
+# Define rescale_regions if it doesn't exist (for 07a script)
+if(!exists("rescale_regions")) {
+  rescale_regions <- "N"  # Default value
+}
+
+# Define normalization_option if it doesn't exist (for 07a script)
+if(!exists("normalization_option")) {
+  normalization_option <- "log"  # Default value
+}
+
+# Instead of sourcing the script, we'll include its functionality directly
+# with necessary modifications
+# source("./scripts/07a_Rf_for_modelperformance.R")
+
+# BEGIN MODIFIED 07a_Rf_for_modelperformance.R CONTENT
+test_data_preds <- test_data
+training_data_preds <- training_data
+test_data_preds$prediction_abs <- NA
+test_data_preds$prediction <- NA
+training_data_preds$prediction <- NA
+training_data_preds$prediction_abs <- NA
+
+# Updated update_GDPpc_t0 function for 07a
+update_GDPpc_t0_07a <- function(data_subset, data, labeled_data, year, column_name_preds) {
+  # Create GDPpc_t0 column if it doesn't exist
+  if(!"GDPpc_t0" %in% colnames(data_subset)) {
+    data_subset$GDPpc_t0 <- NA
+  }
+  
+  for(m in 1:nrow(data_subset)){
+    # Check if country and ID2 columns exist
+    if(!"country" %in% colnames(data_subset) || !"ID2" %in% colnames(data)) {
+      next  # Skip if required columns don't exist
+    }
+    
+    # Create ID2-like identifier
+    id2_key <- paste(data_subset$country[m], year, sep="_")
+    
+    # Check if column_name_preds exists in data
+    if(!column_name_preds %in% colnames(data)) {
+      data_subset$GDPpc_t0[m] <- NA
+      next  # Skip this iteration
+    }
+    
+    # Try to get tempGDP, with error handling
+    tempGDP <- NA
+    tryCatch({
+      matched_rows <- data$ID2 == id2_key
+      if(any(matched_rows)) {
+        tempGDP <- data[[column_name_preds]][matched_rows][1]
+      }
+    }, error = function(e) {
+      warning(paste("Error looking up ID2:", id2_key, "Error:", e$message))
+    })
+    
+    # Try alternate lookup methods if first one failed
+    if(is.na(tempGDP) && "country_0" %in% colnames(data_subset)) {
+      id2_alt_key <- paste(data_subset$country_0[m], year, sep="_")
+      
+      # Try in labeled_data
+      tryCatch({
+        matched_rows <- labeled_data$ID2 == id2_alt_key
+        if(any(matched_rows) && "GDPpc" %in% colnames(labeled_data)) {
+          tempGDP <- log10(labeled_data$GDPpc[matched_rows][1])
+        }
+      }, error = function(e) {
+        warning(paste("Error looking up ID2 in labeled_data:", id2_alt_key, "Error:", e$message))
+      })
+      
+      # Try in data if still NA
+      if(is.na(tempGDP)) {
+        tryCatch({
+          matched_rows <- data$ID2 == id2_alt_key
+          if(any(matched_rows)) {
+            tempGDP <- data[[column_name_preds]][matched_rows][1]
+          }
+        }, error = function(e) {
+          warning(paste("Error looking up alt ID2 in data:", id2_alt_key, "Error:", e$message))
+        })
+      }
+    }
+    
+    # Update GDPpc_t0 if we found a value
+    if(!is.na(tempGDP)) {
+      # Check if labeled_data has the required columns
+      if(all(c("ID2", "GDPpc") %in% colnames(labeled_data))) {
+        id2_check <- paste(data_subset$country[m], year, sep="_")
+        matched_rows <- labeled_data$ID2 == id2_check
+        existing_gdp <- NA
+        if(any(matched_rows)) {
+          existing_gdp <- labeled_data$GDPpc[matched_rows][1]
+        }
+        
+        data_subset$GDPpc_t0[m] <- ifelse(is.na(existing_gdp), tempGDP, data_subset$GDPpc_t0[m])
+      } else {
+        data_subset$GDPpc_t0[m] <- tempGDP
+      }
+    }
+  }
+  return(data_subset)
+}
+
 # Define proper cross-validation control
 cctrl1 <- trainControl(
   method = "cv",
-  number = 5, #how many times the model will run
-  verboseIter = TRUE,  # Set to TRUE to see progress
+  number = n_draws,  # Use n_draws instead of hardcoded value
+  verboseIter = TRUE,
   savePredictions = TRUE,
   allowParallel = TRUE
 )
@@ -182,16 +306,23 @@ RMSE_tab$share <- RMSE_tab$`sqrt(mean(RMSE, na.rm = TRUE))` / RMSE_tab$avgGDPpc
 AME_tab$avgGDPpc <- avgGDPpc$`mean(GDPpc, na.rm = TRUE)`
 AME_tab$share <- AME_tab$`mean(AME, na.rm = TRUE)` / AME_tab$avgGDPpc
 
+y_min <- min(test_data$GDPpc, na.rm=TRUE)
+y_max <- max(test_data$GDPpc, na.rm=TRUE)
+x_min <- min(test_data$prediction_abs, na.rm=TRUE)
+x_max <- max(test_data$prediction_abs, na.rm=TRUE)
+
 # Visualization
-fullmodel <- ggplot(test_data, aes(y=GDPpc, x=prediction_abs)) + stat_poly_eq(formula = y~x, data=test_data, aes(label = after_stat(rr.label)), parse = TRUE) +
+# Update full model visualization with improved axis formatting
+fullmodel <- ggplot(test_data, aes(y=GDPpc, x=prediction_abs)) + 
+  stat_poly_eq(formula = y~x, data=test_data, aes(label = after_stat(rr.label)), parse = TRUE) +
   geom_smooth(method="lm", se=FALSE, linetype="dashed", color="grey") + 
   geom_abline(slope = 1, intercept = 0, color = "grey") + 
   geom_point(size=1.5, color = "darkorange1") + 
   geom_text(label=test_data$ID2, check_overlap=TRUE, size=2.5, nudge_y = -0.02) +
-  scale_x_continuous(trans='log10') + 
-  scale_y_continuous(trans='log10') + 
+  scale_x_continuous(trans='log10', labels = scales::comma, limits = c(x_min, x_max)) + 
+  scale_y_continuous(trans='log10', labels = scales::comma, limits = c(y_min, y_max)) + 
   theme_light() + 
-  labs(x="prediction", y="log(GDP per capita)", title = "Full model")
+  labs(x="Prediction (log scale)", y="GDP per capita (log scale)", title = "Full model")
 
 # Save the first visualization
 if(exists("version")) {
@@ -239,20 +370,32 @@ for(p in 1:5){
     
     # Fit fixed effects model
     tryCatch({
-      model <- feols(as.formula("log10(GDPpc) ~ GDPpc_t0 + as.factor(year) + as.factor(UN_subregion)"),
-                     data = training_data_sub)
+      # Check if UN_subregion exists, if not use a simpler model
+      if("UN_subregion" %in% colnames(training_data_sub)) {
+        model <- feols(
+          as.formula("log10(GDPpc) ~ GDPpc_t0 + as.factor(year) + as.factor(UN_subregion)"),
+          data = training_data_sub
+        )
+      } else {
+        model <- feols(
+          as.formula("log10(GDPpc) ~ GDPpc_t0 + as.factor(year)"),
+          data = training_data_sub
+        )
+      }
       
       # Make predictions
       test_data_sub$prediction <- predict(model, newdata = test_data_sub)
       test_data_sub$prediction_abs <- 10^test_data_sub$prediction
       
-      # Update test data
-      for(i in 1:nrow(test_data_sub)) {
-        row_id <- test_data_sub$ID[i]
-        test_idx <- which(test_data$ID == row_id)
-        if(length(test_idx) > 0) {
-          test_data$prediction[test_idx] <- test_data_sub$prediction[i]
-          test_data$prediction_abs[test_idx] <- test_data_sub$prediction_abs[i]
+      # Update test data by ID
+      if("ID" %in% colnames(test_data_sub) && "ID" %in% colnames(test_data)) {
+        for(i in 1:nrow(test_data_sub)) {
+          row_id <- test_data_sub$ID[i]
+          test_idx <- which(test_data$ID == row_id)
+          if(length(test_idx) > 0) {
+            test_data$prediction[test_idx] <- test_data_sub$prediction[i]
+            test_data$prediction_abs[test_idx] <- test_data_sub$prediction_abs[i]
+          }
         }
       }
       
@@ -260,20 +403,22 @@ for(p in 1:5){
       training_data_sub$prediction <- predict(model, newdata = training_data_sub)
       training_data_sub$prediction_abs <- 10^training_data_sub$prediction
       
-      # Update training data
-      for(i in 1:nrow(training_data_sub)) {
-        row_id <- training_data_sub$ID[i]
-        train_idx <- which(training_data$ID == row_id)
-        if(length(train_idx) > 0) {
-          training_data$prediction[train_idx] <- training_data_sub$prediction[i]
-          training_data$prediction_abs[train_idx] <- training_data_sub$prediction_abs[i]
+      # Update training data by ID
+      if("ID" %in% colnames(training_data_sub) && "ID" %in% colnames(training_data)) {
+        for(i in 1:nrow(training_data_sub)) {
+          row_id <- training_data_sub$ID[i]
+          train_idx <- which(training_data$ID == row_id)
+          if(length(train_idx) > 0) {
+            training_data$prediction[train_idx] <- training_data_sub$prediction[i]
+            training_data$prediction_abs[train_idx] <- training_data_sub$prediction_abs[i]
+          }
         }
       }
     }, error = function(e) {
       cat("Error in model for period", p, ":", e$message, "\n")
     })
   } else {
-    cat("Skipping period", p, "due to insufficient data\n")
+    cat("Skipping period", p, "due to insufficient data or missing GDPpc_t0 column\n")
   }
 }
 
@@ -301,17 +446,25 @@ RMSE_tab$share <- RMSE_tab$`sqrt(mean(RMSE, na.rm = TRUE))` / RMSE_tab$avgGDPpc
 AME_tab$avgGDPpc <- avgGDPpc$`mean(GDPpc, na.rm = TRUE)`
 AME_tab$share <- AME_tab$`mean(AME, na.rm = TRUE)` / AME_tab$avgGDPpc
 
-# Create baseline model visualization
+# Create baseline model visualization with proper formatting
 baselinemodel <- ggplot(test_data, aes(y=GDPpc, x=prediction_abs)) + 
   stat_poly_eq(formula = y~x, data=test_data, aes(label = after_stat(rr.label)), parse = TRUE) +
   geom_smooth(method="lm", se=FALSE, linetype="dashed", color="grey") + 
   geom_abline(slope = 1, intercept = 0, color = "grey") + 
   geom_point(size=1.5, color = "darkorange1") + 
   geom_text(label=test_data$ID2, check_overlap=TRUE, size=2.5, nudge_y = -0.02) +
-  scale_x_continuous(trans='log10') + 
-  scale_y_continuous(trans='log10') + 
+  scale_x_continuous(trans='log10', labels = scales::comma, limits = c(x_min, x_max)) + 
+  scale_y_continuous(trans='log10', labels = scales::comma, limits = c(y_min, y_max)) + 
   theme_light() + 
-  labs(x="prediction", y="log(GDP per capita)", title = "Baseline model")
+  labs(x="Prediction (log scale)", y="GDP per capita (log scale)", title = "Baseline model")
+
+# Create combined plot
+model_comparison <- plot_grid(baselinemodel, fullmodel, labels = "AUTO", ncol = 2)
+
+# Save the final figure
+if(exists("version")) {
+  ggsave(paste0("./genfiles_", version, "/figures/Fig2_AB.svg"), plot=model_comparison, width = 8, height = 4)
+}
 
 # Compare models with visualizations
 RMSE_tab_fullmodel$group <- "Full model"
@@ -343,11 +496,3 @@ ame_plot <- ggplot(AME_tab_full, aes(x=share*100, y=as.factor(histperiod), fill=
   theme_light() +
   labs(y="Century", x="AME, % of average GDP per capita", fill="Model") +
   theme(legend.title=element_blank())
-
-# Compare baseline and full models
-model_comparison <- plot_grid(baselinemodel, fullmodel, labels=c("A", "B"), ncol=2)
-
-# Save the final figure
-if(exists("version")) {
-  ggsave(paste0("./genfiles_", version, "/figures/Fig2_AB.svg"), plot=model_comparison, width=8, height=4)
-}
