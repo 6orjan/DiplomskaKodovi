@@ -306,29 +306,6 @@ RMSE_tab$share <- RMSE_tab$`sqrt(mean(RMSE, na.rm = TRUE))` / RMSE_tab$avgGDPpc
 AME_tab$avgGDPpc <- avgGDPpc$`mean(GDPpc, na.rm = TRUE)`
 AME_tab$share <- AME_tab$`mean(AME, na.rm = TRUE)` / AME_tab$avgGDPpc
 
-y_min <- min(test_data$GDPpc, na.rm=TRUE)
-y_max <- max(test_data$GDPpc, na.rm=TRUE)
-x_min <- min(test_data$prediction_abs, na.rm=TRUE)
-x_max <- max(test_data$prediction_abs, na.rm=TRUE)
-
-# Visualization
-# Update full model visualization with improved axis formatting
-fullmodel <- ggplot(test_data, aes(y=GDPpc, x=prediction_abs)) + 
-  stat_poly_eq(formula = y~x, data=test_data, aes(label = after_stat(rr.label)), parse = TRUE) +
-  geom_smooth(method="lm", se=FALSE, linetype="dashed", color="grey") + 
-  geom_abline(slope = 1, intercept = 0, color = "grey") + 
-  geom_point(size=1.5, color = "darkorange1") + 
-  geom_text(label=test_data$ID2, check_overlap=TRUE, size=2.5, nudge_y = -0.02) +
-  scale_x_continuous(trans='log10', labels = scales::comma, limits = c(x_min, x_max)) + 
-  scale_y_continuous(trans='log10', labels = scales::comma, limits = c(y_min, y_max)) + 
-  theme_light() + 
-  labs(x="Prediction (log scale)", y="GDP per capita (log scale)", title = "Full model")
-
-# Save the first visualization
-if(exists("version")) {
-  ggsave(paste0("./genfiles_", version, "/figures/Fig2_AB.svg"), width = 8, height = 4)
-}
-
 # Store the full model results
 RMSE_overall_fullmodel <- RMSE_overall
 RMSE_tab_fullmodel <- RMSE_tab
@@ -446,7 +423,13 @@ RMSE_tab$share <- RMSE_tab$`sqrt(mean(RMSE, na.rm = TRUE))` / RMSE_tab$avgGDPpc
 AME_tab$avgGDPpc <- avgGDPpc$`mean(GDPpc, na.rm = TRUE)`
 AME_tab$share <- AME_tab$`mean(AME, na.rm = TRUE)` / AME_tab$avgGDPpc
 
-# Create baseline model visualization with proper formatting
+# First determine the common limits needed for both plots
+y_min <- min(test_data$GDPpc, na.rm=TRUE)
+y_max <- max(test_data$GDPpc, na.rm=TRUE)
+x_min <- min(test_data$prediction_abs, na.rm=TRUE)
+x_max <- max(test_data$prediction_abs, na.rm=TRUE)
+
+# Create baseline model visualization with consistent axis limits
 baselinemodel <- ggplot(test_data, aes(y=GDPpc, x=prediction_abs)) + 
   stat_poly_eq(formula = y~x, data=test_data, aes(label = after_stat(rr.label)), parse = TRUE) +
   geom_smooth(method="lm", se=FALSE, linetype="dashed", color="grey") + 
@@ -458,12 +441,44 @@ baselinemodel <- ggplot(test_data, aes(y=GDPpc, x=prediction_abs)) +
   theme_light() + 
   labs(x="Prediction (log scale)", y="GDP per capita (log scale)", title = "Baseline model")
 
-# Create combined plot
-model_comparison <- plot_grid(baselinemodel, fullmodel, labels = "AUTO", ncol = 2)
+# Update full model visualization with the same axis limits
+fullmodel <- ggplot(test_data, aes(y=GDPpc, x=prediction_abs)) + 
+  stat_poly_eq(formula = y~x, data=test_data, aes(label = after_stat(rr.label)), parse = TRUE) +
+  geom_smooth(method="lm", se=FALSE, linetype="dashed", color="grey") + 
+  geom_abline(slope = 1, intercept = 0, color = "grey") + 
+  geom_point(size=1.5, color = "darkorange1") + 
+  geom_text(label=test_data$ID2, check_overlap=TRUE, size=2.5, nudge_y = -0.02) +
+  scale_x_continuous(trans='log10', labels = scales::comma, limits = c(x_min, x_max)) + 
+  scale_y_continuous(trans='log10', labels = scales::comma, limits = c(y_min, y_max)) + 
+  theme_light() + 
+  labs(x="Prediction (log scale)", y="GDP per capita (log scale)", title = "Full model")
+
+# Print individual plots first to ensure they render properly
+print(baselinemodel)
+print(fullmodel)
+
+# Save individual plots
+if(exists("version")) {
+  ggsave(paste0("./genfiles_", version, "/figures/baselinemodel.svg"), plot=baselinemodel, width=4, height=4)
+  ggsave(paste0("./genfiles_", version, "/figures/fullmodel.svg"), plot=fullmodel, width=4, height=4)
+}
+
+# Create combined plot with explicit dimensions and alignment
+model_comparison <- plot_grid(
+  baselinemodel, 
+  fullmodel, 
+  labels = c("A", "B"), 
+  ncol = 2,
+  align = 'vh',
+  axis = 'tblr'
+)
+
+# Print the combined plot to verify
+print(model_comparison)
 
 # Save the final figure
 if(exists("version")) {
-  ggsave(paste0("./genfiles_", version, "/figures/Fig2_AB.svg"), plot=model_comparison, width = 8, height = 4)
+  ggsave(paste0("./genfiles_", version, "/figures/Fig2_AB.svg"), plot=model_comparison, width=8, height=4)
 }
 
 # Compare models with visualizations
@@ -481,6 +496,9 @@ rmse_plot <- ggplot(RMSE_tab_full, aes(x=share*100, y=as.factor(histperiod), fil
   labs(y="Century", x="RMSE, % of average GDP per capita", fill="Model") +
   theme(legend.title=element_blank())
 
+# Print RMSE comparison
+print(rmse_plot)
+
 # Create AME comparison
 AME_tab_fullmodel$group <- "Full model"
 AME_tab_fullmodel$century <- c("1300-1500", "1550-1750", "1800-1850", "1900-1950", "2000")
@@ -496,3 +514,12 @@ ame_plot <- ggplot(AME_tab_full, aes(x=share*100, y=as.factor(histperiod), fill=
   theme_light() +
   labs(y="Century", x="AME, % of average GDP per capita", fill="Model") +
   theme(legend.title=element_blank())
+
+# Print AME comparison
+print(ame_plot)
+
+# Save comparison plots
+if(exists("version")) {
+  ggsave(paste0("./genfiles_", version, "/figures/RMSE_comparison.svg"), plot=rmse_plot, width=6, height=4)
+  ggsave(paste0("./genfiles_", version, "/figures/AME_comparison.svg"), plot=ame_plot, width=6, height=4)
+}
