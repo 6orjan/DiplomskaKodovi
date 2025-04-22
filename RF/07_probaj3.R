@@ -560,6 +560,41 @@ if(!is.null(baselinemodel) && !is.null(fullmodel)) {
 
 # --- MODEL COMPARISON ---
 
+# Re-calculate metrics for the full model
+# This ensures we have the RMSE_tab_fullmodel object
+test_data$prediction <- test_data_preds$prediction  # Use stored predictions
+test_data$prediction_abs <- test_data_preds$prediction_abs
+
+# Recompute metrics for full model
+test_data$RMSE <- (test_data$prediction_abs - test_data$GDPpc)^2
+test_data$RMSE_logs <- (test_data$prediction - log10(test_data$GDPpc))^2
+test_data$AME <- abs(test_data$prediction_abs - test_data$GDPpc)
+
+# Recalculate metrics grouped by historical period for full model
+RMSE_tab_fullmodel <- test_data %>% 
+  dplyr::group_by(histperiod) %>% 
+  dplyr::summarize(RMSE_value = sqrt(mean(RMSE, na.rm=TRUE))) %>% 
+  as.data.frame()
+
+# Get average GDP per capita for each period
+avgGDPpc_full <- test_data %>% 
+  dplyr::group_by(histperiod) %>% 
+  dplyr::summarize(avgGDPpc = mean(GDPpc, na.rm=TRUE))
+
+# Merge metrics with average GDP
+RMSE_tab_fullmodel <- merge(RMSE_tab_fullmodel, avgGDPpc_full, by="histperiod")
+RMSE_tab_fullmodel$share <- RMSE_tab_fullmodel$RMSE_value / RMSE_tab_fullmodel$avgGDPpc
+
+# Recalculate AME metrics for full model
+AME_tab_fullmodel <- test_data %>% 
+  dplyr::group_by(histperiod) %>% 
+  dplyr::summarize(AME_value = mean(AME, na.rm=TRUE)) %>% 
+  as.data.frame()
+
+# Merge AME with average GDP
+AME_tab_fullmodel <- merge(AME_tab_fullmodel, avgGDPpc_full, by="histperiod")
+AME_tab_fullmodel$share <- AME_tab_fullmodel$AME_value / AME_tab_fullmodel$avgGDPpc
+
 # Add period labels to the tables
 RMSE_tab_fullmodel$histperiod <- as.numeric(RMSE_tab_fullmodel$histperiod)
 RMSE_tab$histperiod <- as.numeric(RMSE_tab$histperiod)
