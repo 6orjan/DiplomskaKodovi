@@ -84,7 +84,7 @@ for(p in 1:5){
   
   # Train Random Forest model with hyperparameter tuning
   set.seed(p)
-  rf_model <- train(
+  rf_model <- caret::train(
     fulldata_sub[,startcolumn:ncol(fulldata_sub)], 
     y_var,
     method = "ranger",
