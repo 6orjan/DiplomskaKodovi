@@ -1,4 +1,4 @@
-#file 07a_SVM_for_modelperformance_parallel.R
+#file 07a_SVM_for_modelperformance_skip_period5.R
 
 # Load necessary libraries if not already loaded
 # library(caret)
@@ -39,8 +39,9 @@ update_GDPpc_t0 <- function(data_subset, data, labeled_data, year, column_name_p
   }
 }
 
-for(selperiod in 1:5){
-  cat("Processing period", selperiod, "of 5\n")
+# Process only periods 1-4, skip period 5
+for(selperiod in 1:4){  # Changed from 1:5 to 1:4
+  cat("Processing period", selperiod, "of 4\n")
   
   startcolumn <- 14
   
@@ -56,11 +57,7 @@ for(selperiod in 1:5){
   } else if(selperiod == 4){
     update_GDPpc_t0(test_data_sub, test_data_preds, labeled_data, 1850, "prediction")
     update_GDPpc_t0(training_data_sub, training_data_preds, labeled_data, 1850, "prediction")
-  } else if(selperiod == 5){
-    update_GDPpc_t0(test_data_sub, test_data_preds, labeled_data, 1950, "prediction")
-    update_GDPpc_t0(training_data_sub, training_data_preds, labeled_data, 1950, "prediction")
   }
-  
   
   # Data preprocessing and model training
   cctrl1 <- trainControl(
@@ -77,7 +74,7 @@ for(selperiod in 1:5){
   
   # Train SVM model with cross-validation and parallel processing
   cat("Training SVM model for period", selperiod, "\n")
-  test_class_cv_model <- train(
+  test_class_cv_model <- caret::train(
     training_data_sub[,startcolumn:ncol(training_data_sub)], 
     log10(training_data_sub$GDPpc), 
     method = "svmLinear", 
@@ -201,7 +198,56 @@ for(selperiod in 1:5){
     
   }
   
-  cat("Completed period", selperiod, "of 5\n")
+  cat("Completed period", selperiod, "of 4\n")
+}
+
+# For period 5 observations in test_data, use predictions from period 4 as a proxy
+# This handles the case where we need predictions for period 5 test data
+
+cat("Handling period 5 data by using predictions from period 4\n")
+
+# Identify period 5 test data
+test_data_period5 <- subset(test_data, histperiod == 5)
+
+if(nrow(test_data_period5) > 0) {
+  cat("Found", nrow(test_data_period5), "observations for period 5 in test data\n")
+  
+  # For each observation in period 5, find the same country in period 4 if possible
+  for(i in 1:nrow(test_data_period5)) {
+    country_i <- test_data_period5$country[i]
+    
+    # Look for the same country in period 4
+    period4_match <- subset(test_data_preds, histperiod == 4 & country == country_i)
+    
+    if(nrow(period4_match) > 0) {
+      # If match found, use average prediction from period 4
+      avg_prediction <- mean(period4_match$prediction, na.rm = TRUE)
+      avg_prediction_abs <- mean(period4_match$prediction_abs, na.rm = TRUE)
+      
+      # If values are not NA, use them
+      if(!is.na(avg_prediction) && !is.na(avg_prediction_abs)) {
+        test_data_preds$prediction[test_data_preds$ID == test_data_period5$ID[i]] <- avg_prediction
+        test_data_preds$prediction_abs[test_data_preds$ID == test_data_period5$ID[i]] <- avg_prediction_abs
+      }
+    } else {
+      # If no match for country, try region
+      region_i <- test_data_period5$UN_subregion[i]
+      region4_match <- subset(test_data_preds, histperiod == 4 & UN_subregion == region_i)
+      
+      if(nrow(region4_match) > 0) {
+        # Use regional average from period 4
+        avg_prediction <- mean(region4_match$prediction, na.rm = TRUE)
+        avg_prediction_abs <- mean(region4_match$prediction_abs, na.rm = TRUE)
+        
+        if(!is.na(avg_prediction) && !is.na(avg_prediction_abs)) {
+          test_data_preds$prediction[test_data_preds$ID == test_data_period5$ID[i]] <- avg_prediction
+          test_data_preds$prediction_abs[test_data_preds$ID == test_data_period5$ID[i]] <- avg_prediction_abs
+        }
+      }
+    }
+  }
+  
+  cat("Completed handling of period 5 data\n")
 }
 
 # Clean up parallel cluster when done
