@@ -1,8 +1,14 @@
-#file 07a_SVM_for_modelperformance.R
+#file 07a_SVM_for_modelperformance_parallel.R
 
 # Load necessary libraries if not already loaded
-# library(e1071)  # For SVM implementation
-# library(caret)  # For model training
+# library(caret)
+# library(doParallel)  # For parallel processing
+
+# Setting up parallel processing to speed up calculations
+cores <- max(1, parallel::detectCores() - 1)  # Use all cores except one
+cl <- makeCluster(cores)
+registerDoParallel(cl)
+cat("Using", cores, "cores for parallel processing\n")
 
 test_data_preds <- test_data
 test_data_preds$prediction_abs <- NA
@@ -34,6 +40,7 @@ update_GDPpc_t0 <- function(data_subset, data, labeled_data, year, column_name_p
 }
 
 for(selperiod in 1:5){
+  cat("Processing period", selperiod, "of 5\n")
   
   startcolumn <- 14
   
@@ -55,28 +62,38 @@ for(selperiod in 1:5){
   }
   
   
-  # Data preprocessing and model training with SVM instead of elastic net
-  cctrl1 <- trainControl(method="cv", number = min(k, nrow(training_data_sub)))
+  # Data preprocessing and model training
+  cctrl1 <- trainControl(
+    method = "cv", 
+    number = min(k, nrow(training_data_sub)),
+    allowParallel = TRUE  # Allow parallel processing
+  )
+  
   training_data_sub <- subset(training_data_sub, complete.cases(training_data_sub[,startcolumn:ncol(training_data_sub)]))
   
   cols <- match("year1300", colnames(training_data_sub)):match("year2000", colnames(training_data_sub))
   training_data_sub[ , cols] <- apply(training_data_sub[ , cols], 2,            # Specify own function within apply
                                       function(x) as.numeric(as.character(x)))
   
-  # Train SVM model with cross-validation
-  # Using 'svmLinear' method instead of 'glmnet' for linear SVM
-  test_class_cv_model <- train(training_data_sub[,startcolumn:ncol(training_data_sub)], log10(training_data_sub$GDPpc), 
-                               method = "svmLinear", 
-                               trControl = cctrl1, 
-                               metric = "MAE", 
-                               tuneGrid = training_grid_modelperformance)
+  # Train SVM model with cross-validation and parallel processing
+  cat("Training SVM model for period", selperiod, "\n")
+  test_class_cv_model <- train(
+    training_data_sub[,startcolumn:ncol(training_data_sub)], 
+    log10(training_data_sub$GDPpc), 
+    method = "svmLinear", 
+    trControl = cctrl1, 
+    metric = "MAE", 
+    tuneGrid = training_grid_modelperformance,
+    preProcess = c("center", "scale")  # Add preprocessing for better SVM performance
+  )
   
-  # Get best tuning parameter (C value)
+  # Get best tuning parameter
   best_C <- test_class_cv_model$bestTune$C
+  cat("Best C value for period", selperiod, "is", best_C, "\n")
   
   # Prepare test data
-  test_data_sub[ , cols] <- apply(test_data_sub[ , cols], 2, 
-                                  function(x) as.numeric(as.character(x)))
+  test_data_sub[ , cols] <- apply(test_data_sub[ , cols], 2,            # Specify own function within apply
+                                  function(x) as.numeric(as.character(x))) 
   
   # Make predictions using the best SVM model
   test_data_sub$prediction <- predict(test_class_cv_model, newdata = test_data_sub[,startcolumn:ncol(training_data_sub)])
@@ -131,6 +148,8 @@ for(selperiod in 1:5){
     
   }
   
+  
+  
   # Make predictions for training data as well to use as input in the next period
   training_data_sub$prediction <- predict(test_class_cv_model, newdata = training_data_sub[,startcolumn:ncol(training_data_sub)])
   training_data_sub$prediction_abs <- 10^training_data_sub$prediction
@@ -181,7 +200,13 @@ for(selperiod in 1:5){
     training_data_preds$country_0_period <- NULL
     
   }
+  
+  cat("Completed period", selperiod, "of 5\n")
 }
+
+# Clean up parallel cluster when done
+stopCluster(cl)
+cat("Parallel processing finished and cleaned up\n")
 
 # Update test_data with predictions
 test_data <- test_data_preds
